@@ -16,6 +16,8 @@ export class Viewer {
   /** Контурная подсветка наведённой/выбранной поддержки. */
   readonly outline: OutlinePass;
   private readonly container: HTMLElement;
+  private fitTargets: THREE.Object3D[] = [];
+  private fitUntil = 0; // до этого момента повторяем fit при ресайзах (раскладка устаканивается)
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -85,19 +87,33 @@ export class Viewer {
     this.camera.top = fh;
     this.camera.bottom = -fh;
     this.camera.updateProjectionMatrix();
-    this.renderer.setSize(w, h, false);
+    this.renderer.setSize(w, h);
     this.composer.setSize(w, h);
     this.outline.setSize(w, h);
+    // Пока раскладка устаканивается (шрифты, размеры панели) — держим вид вписанным.
+    if (this.fitTargets.length && performance.now() < this.fitUntil) this.doFit();
   }
 
-  /** Изометрический вид + zoom-fit: вмещает все переданные объекты. */
+  /**
+   * Изометрический вид + zoom-fit. Запоминает цель и в течение ~1.5 c повторяет
+   * подгонку при ресайзах — это устраняет гонку с раскладкой/загрузкой шрифтов.
+   */
   fitIsometric(objects: THREE.Object3D[]) {
+    this.fitTargets = objects.filter(Boolean);
+    this.fitUntil = performance.now() + 1500;
+    this.doFit();
+  }
+
+  private doFit() {
+    const w = this.container.clientWidth;
+    const h = this.container.clientHeight;
+    if (!this.fitTargets.length || w < 2 || h < 2) return; // нет валидного размера — ждём ресайза
+
     const box = new THREE.Box3();
-    for (const o of objects) if (o) box.expandByObject(o);
+    for (const o of this.fitTargets) box.expandByObject(o);
     if (box.isEmpty()) return;
 
-    // Кадр пересчитываем по актуальному размеру контейнера (устойчиво к гонке с раскладкой).
-    const aspect = (this.container.clientWidth || 1) / (this.container.clientHeight || 1);
+    const aspect = w / h;
     const fh = this.frustumHalf;
     this.camera.left = -fh * aspect;
     this.camera.right = fh * aspect;
