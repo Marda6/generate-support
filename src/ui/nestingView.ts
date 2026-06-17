@@ -3,10 +3,77 @@
 // Кнопка Download ▾ скачивает текущий лист в выбранном формате (SVG / DXF).
 
 import { SUPPORT_TYPES } from "../generator/ribs";
-import { nestParts, type Part, type PlacedPart, type Sheet } from "../export/nesting";
+import { nestParts, type Part, type PlacedPart, type Sheet, type Vec2 } from "../export/nesting";
+import { buildManifest, groupParts, type PartGroup } from "../export/manifest";
 
 const COLOR: Record<string, string> = {};
 for (const t of SUPPORT_TYPES) COLOR[t.kind] = "#" + t.color.toString(16).padStart(6, "0");
+
+// ---- компенсация реза (kerf): смещение контура на величину d ----
+function signedArea(pts: Vec2[]): number {
+  let a = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i];
+    const q = pts[(i + 1) % pts.length];
+    a += p.x * q.y - q.x * p.y;
+  }
+  return a / 2;
+}
+
+/** Смещение замкнутого контура на d (d>0 — наружу, увеличивает площадь). Митра-стыки. */
+function offsetRing(pts: Vec2[], d: number): Vec2[] {
+  if (pts.length < 3 || d === 0) return pts;
+  const last = pts[pts.length - 1];
+  const ring = last.x === pts[0].x && last.y === pts[0].y ? pts.slice(0, -1) : pts;
+  const m = ring.length;
+  if (m < 3) return pts;
+  const s = signedArea(ring) >= 0 ? 1 : -1;
+  const out: Vec2[] = [];
+  for (let i = 0; i < m; i++) {
+    const prev = ring[(i - 1 + m) % m];
+    const cur = ring[i];
+    const next = ring[(i + 1) % m];
+    let e1x = cur.x - prev.x;
+    let e1y = cur.y - prev.y;
+    const l1 = Math.hypot(e1x, e1y) || 1;
+    e1x /= l1;
+    e1y /= l1;
+    let e2x = next.x - cur.x;
+    let e2y = next.y - cur.y;
+    const l2 = Math.hypot(e2x, e2y) || 1;
+    e2x /= l2;
+    e2y /= l2;
+    // внешние нормали рёбер (поворот -90°), с учётом обхода
+    const n1x = e1y * s;
+    const n1y = -e1x * s;
+    const n2x = e2y * s;
+    const n2y = -e2x * s;
+    let bx = n1x + n2x;
+    let by = n1y + n2y;
+    const bl = Math.hypot(bx, by);
+    if (bl < 1e-6) {
+      bx = n2x;
+      by = n2y;
+    } else {
+      bx /= bl;
+      by /= bl;
+    }
+    const cosHalf = bx * n2x + by * n2y;
+    const miter = d / Math.max(cosHalf, 0.25); // клампим длину митры на острых углах
+    out.push({ x: cur.x + bx * miter, y: cur.y + by * miter });
+  }
+  return out;
+}
+
+/** Наружный контур — наружу на k, отверстия — внутрь на k (k = kerf/2). */
+function applyKerf(part: Part, kerf: number): Part {
+  const k = kerf / 2;
+  return {
+    ...part,
+    contour: offsetRing(part.contour, k),
+    holes: part.holes.map((h) => offsetRing(h, -k)),
+  };
+}
 
 const DEFAULT_W = 1000;
 const DEFAULT_H = 600;
@@ -17,11 +84,20 @@ export interface NestingView {
   setVisible(v: boolean): void;
 }
 
-/** Контуры детали в координатах листа (y вниз, начало — левый-верхний угол). */
+/** Контуры детали в координатах листа (y вниз, начало — левый-верхний угол).
+ *  Учитывает поворот детали на 90°. */
 function placedRings(pp: PlacedPart): { x: number; y: number }[][] {
   const rings = [pp.part.contour, ...pp.part.holes];
+  const dispH = pp.rotated ? pp.w : pp.h; // высота детали на листе с учётом поворота
   return rings.map((ring) =>
-    ring.map((v) => ({ x: pp.ox + (v.x - pp.minX), y: pp.oy + (pp.h - (v.y - pp.minY)) }))
+    ring.map((v) => {
+      const nx = v.x - pp.minX; // 0..pp.w
+      const ny = v.y - pp.minY; // 0..pp.h
+      // поворот на 90° (без зеркалирования) либо как есть
+      const lx = pp.rotated ? ny : nx;
+      const ly = pp.rotated ? pp.w - nx : ny;
+      return { x: pp.ox + lx, y: pp.oy + (dispH - ly) };
+    })
   );
 }
 
@@ -31,11 +107,23 @@ function ringsPath(pp: PlacedPart): string {
     .join(" ");
 }
 
-function sheetBodies(sheet: Sheet): string {
+interface Highlight {
+  sel: string | null;
+  typeOf: (p: Part) => string | undefined;
+}
+
+function sheetBodies(sheet: Sheet, hi?: Highlight): string {
   return sheet.placed
     .map((pp) => {
       const col = COLOR[pp.part.kind] || "#ffffff";
-      return `<path d="${ringsPath(pp)}" fill="${col}" fill-opacity="0.16" stroke="${col}" stroke-width="1" vector-effect="non-scaling-stroke" fill-rule="evenodd"/>`;
+      let fillOp = 0.16;
+      let strokeOp = 1;
+      if (hi && hi.sel) {
+        const on = hi.typeOf(pp.part) === hi.sel;
+        fillOp = on ? 0.34 : 0.04;
+        strokeOp = on ? 1 : 0.22;
+      }
+      return `<path d="${ringsPath(pp)}" fill="${col}" fill-opacity="${fillOp}" stroke="${col}" stroke-opacity="${strokeOp}" stroke-width="1" vector-effect="non-scaling-stroke" fill-rule="evenodd"/>`;
     })
     .join("");
 }
@@ -55,11 +143,11 @@ function sheetMarkup(sheet: Sheet): string {
  * Превью листа в overview в ЕДИНОМ масштабе для всех карточек: ширина SVG —
  * доля от самого широкого листа (maxW), так что больший лист выглядит больше.
  */
-function cardMarkup(sheet: Sheet, maxW: number): string {
+function cardMarkup(sheet: Sheet, maxW: number, hi: Highlight): string {
   const wPct = (sheet.w / maxW) * 100;
   return `<svg style="width:${wPct.toFixed(2)}%" viewBox="0 0 ${sheet.w} ${sheet.h}" preserveAspectRatio="xMidYMid meet">
     <rect x="0" y="0" width="${sheet.w}" height="${sheet.h}" ${SHEET_RECT}/>
-    ${sheetBodies(sheet)}
+    ${sheetBodies(sheet, hi)}
   </svg>`;
 }
 
@@ -161,7 +249,9 @@ function download(name: string, content: string, mime: string) {
 }
 
 export function createNestingView(): NestingView {
-  let parts: Part[] = [];
+  let rawParts: Part[] = []; // контуры из генератора (без kerf)
+  let parts: Part[] = []; // эффективные контуры (с учётом kerf)
+  let kerf = 0;
   const sizes = new Map<number, { w: number; h: number }>(); // индивидуальные размеры листов
   let lastSheets: Sheet[] = [];
   let mode: "overview" | "detail" = "overview";
@@ -170,14 +260,28 @@ export function createNestingView(): NestingView {
   const el = document.createElement("div");
   el.className = "nesting hidden";
   el.innerHTML = `
-    <div class="nest-all-wrap hidden" id="allWrap">
-      <button class="nest-dl" id="allDl">Download all <span class="nest-chev">▾</span></button>
-      <div class="nest-dl-menu hidden" id="allMenu">
-        <button data-fmt="svg">SVG</button>
-        <button data-fmt="dxf">DXF</button>
+    <div class="nest-overview" id="nestOverview">
+      <div class="nest-overview-bar">
+        <span class="nest-bar-info" id="sheetCount"></span>
+        <span class="nest-bar-sep"></span>
+        <label class="nest-cap-field">Kerf <input class="nest-cap-input" id="nestKerf" type="number" min="0" step="0.05" value="0"> mm</label>
+        <div class="nest-dl-wrap" id="allWrap">
+          <button class="nest-dl" id="allDl">Download <span class="nest-chev">▾</span></button>
+          <div class="nest-dl-menu hidden" id="allMenu">
+            <button data-fmt="svg">SVG (all sheets)</button>
+            <button data-fmt="dxf">DXF (all sheets)</button>
+            <button data-fmt="json">CAM manifest (JSON)</button>
+          </div>
+        </div>
+      </div>
+      <div class="nest-overview-body">
+        <div class="nest-types">
+          <div class="nest-types-list" id="typesList"></div>
+          <div class="nest-types-info" id="typesInfo"></div>
+        </div>
+        <div class="nest-grid" id="nestGrid"></div>
       </div>
     </div>
-    <div class="nest-overview" id="nestOverview"></div>
     <div class="nest-detail hidden" id="nestDetail">
       <div class="nest-detail-bar">
         <button class="nest-back" id="nestBack">‹ All sheets</button>
@@ -209,30 +313,96 @@ export function createNestingView(): NestingView {
   const dDl = el.querySelector("#dDl") as HTMLButtonElement;
   const dDlWrap = el.querySelector("#dDlWrap") as HTMLElement;
   const back = el.querySelector("#nestBack") as HTMLButtonElement;
+  const gridEl = el.querySelector("#nestGrid") as HTMLElement;
   const allWrap = el.querySelector("#allWrap") as HTMLElement;
   const allDl = el.querySelector("#allDl") as HTMLButtonElement;
   const allMenu = el.querySelector("#allMenu") as HTMLElement;
+  const kerfInput = el.querySelector("#nestKerf") as HTMLInputElement;
+  const sheetCount = el.querySelector("#sheetCount") as HTMLElement;
+  const typesList = el.querySelector("#typesList") as HTMLElement;
+  const typesInfo = el.querySelector("#typesInfo") as HTMLElement;
 
+  let groups: PartGroup[] = [];
+  const partToType = new Map<Part, string>();
+  let selectedType: string | null = null;
+
+  const computeParts = () => {
+    parts = kerf > 0 ? rawParts.map((p) => applyKerf(p, kerf)) : rawParts;
+  };
   const sizeFor = (i: number) => sizes.get(i) || { w: DEFAULT_W, h: DEFAULT_H };
   const reflow = () => {
     lastSheets = parts.length ? nestParts(parts, sizeFor) : [];
   };
 
-  const renderOverview = () => {
+  // Группировка типов по эффективным контурам; partToType — по идентичности объектов.
+  const refreshTypes = () => {
+    groups = parts.length ? groupParts(parts) : [];
+    partToType.clear();
+    for (const g of groups) for (const p of g.parts) partToType.set(p, g.id);
+    if (selectedType && !groups.some((g) => g.id === selectedType)) selectedType = null;
+  };
+
+  const renderTypesPanel = () => {
+    const totalParts = groups.reduce((s, g) => s + g.parts.length, 0);
+    const allRow = groups.length
+      ? `<button class="nest-type-row${selectedType === null ? " active" : ""}" data-id="">
+          <span class="nest-type-dot nest-type-dot-all"></span>
+          <span class="nest-type-name">All types</span>
+          <span class="nest-type-count">${totalParts}</span>
+        </button>`
+      : "";
+    typesList.innerHTML =
+      allRow +
+      groups
+        .map(
+          (g) =>
+            `<button class="nest-type-row${g.id === selectedType ? " active" : ""}" data-id="${g.id}">
+            <span class="nest-type-dot" style="background:${COLOR[g.kind] || "#888"}"></span>
+            <span class="nest-type-name">${g.id}</span>
+            <span class="nest-type-count">${g.parts.length}</span>
+          </button>`
+        )
+        .join("");
+
+    const sel = groups.find((g) => g.id === selectedType);
+    if (sel) {
+      typesInfo.innerHTML =
+        `<div class="nest-info-head">Type ${sel.id} · ${sel.label} · ${sel.parts.length} pcs</div>` +
+        `<div>Outer contours: 1</div>` +
+        `<div>Inner contours: ${sel.parts[0].holes.length}</div>`;
+    } else if (groups.length) {
+      const totalParts = groups.reduce((s, g) => s + g.parts.length, 0);
+      const totalInner = groups.reduce((s, g) => s + g.parts[0].holes.length * g.parts.length, 0);
+      typesInfo.innerHTML =
+        `<div class="nest-info-head">${groups.length} types · ${totalParts} parts</div>` +
+        `<div>Outer contours: ${totalParts}</div>` +
+        `<div>Inner contours: ${totalInner}</div>`;
+    } else {
+      typesInfo.innerHTML = "";
+    }
+  };
+
+  const renderGrid = () => {
     if (!lastSheets.length) {
-      overviewEl.innerHTML = `<div class="nest-empty">No visible supports to lay out.</div>`;
+      gridEl.innerHTML = `<div class="nest-empty">No visible supports to lay out.</div>`;
       return;
     }
+    const hi: Highlight = { sel: selectedType, typeOf: (p) => partToType.get(p) };
     const maxW = Math.max(...lastSheets.map((s) => s.w), 1);
-    overviewEl.innerHTML = lastSheets
+    gridEl.innerHTML = lastSheets
       .map(
         (s, i) =>
           `<div class="nest-card" data-sheet="${i}">
             <div class="nest-card-cap"><span>Sheet ${i + 1}</span><span class="nest-card-meta">${s.w}×${s.h} · ${s.placed.length} parts</span></div>
-            <div class="nest-card-svg">${cardMarkup(s, maxW)}</div>
+            <div class="nest-card-svg">${cardMarkup(s, maxW, hi)}</div>
           </div>`
       )
       .join("");
+  };
+
+  const renderOverview = () => {
+    renderTypesPanel();
+    renderGrid();
   };
 
   const renderDetail = () => {
@@ -254,7 +424,6 @@ export function createNestingView(): NestingView {
     overviewEl.classList.remove("hidden");
     dMenu.classList.add("hidden");
     renderOverview();
-    allWrap.classList.toggle("hidden", lastSheets.length === 0);
   }
 
   function showDetail(i: number) {
@@ -262,7 +431,6 @@ export function createNestingView(): NestingView {
     detailIndex = i;
     overviewEl.classList.add("hidden");
     detailEl.classList.remove("hidden");
-    allWrap.classList.add("hidden");
     allMenu.classList.add("hidden");
     renderDetail();
   }
@@ -270,6 +438,8 @@ export function createNestingView(): NestingView {
   const render = () => {
     if (el.classList.contains("hidden")) return;
     reflow();
+    refreshTypes();
+    sheetCount.textContent = lastSheets.length ? `${lastSheets.length} sheet${lastSheets.length === 1 ? "" : "s"}` : "";
     if (mode === "detail" && detailIndex < lastSheets.length) renderDetail();
     else showOverview();
   };
@@ -282,6 +452,16 @@ export function createNestingView(): NestingView {
 
   back.addEventListener("click", showOverview);
 
+  // Клик по типу — подсветить его детали на превью (повторный клик снимает).
+  typesList.addEventListener("click", (e) => {
+    const row = (e.target as HTMLElement).closest(".nest-type-row") as HTMLElement | null;
+    if (!row) return;
+    const id = row.dataset.id || null;
+    selectedType = selectedType === id ? null : id;
+    renderTypesPanel();
+    renderGrid();
+  });
+
   // Размер текущего листа (строка над листом).
   const onDetailSize = () => {
     const w = parseFloat(dW.value);
@@ -293,6 +473,15 @@ export function createNestingView(): NestingView {
   };
   dW.addEventListener("change", onDetailSize);
   dH.addEventListener("change", onDetailSize);
+
+  // Компенсация реза (kerf) — пересчёт контуров и раскроя.
+  kerfInput.addEventListener("change", () => {
+    const v = parseFloat(kerfInput.value);
+    kerf = v >= 0 ? v : 0;
+    kerfInput.value = String(kerf);
+    computeParts();
+    render();
+  });
 
   // Выпадающий список форматов.
   dDl.addEventListener("click", (e) => {
@@ -322,6 +511,12 @@ export function createNestingView(): NestingView {
     const btn = (e.target as HTMLElement).closest("button") as HTMLButtonElement | null;
     if (!btn) return;
     allMenu.classList.add("hidden");
+    if (btn.dataset.fmt === "json") {
+      // Манифест — по номинальным контурам (без kerf): CAM применяет рез сам.
+      if (!rawParts.length) return;
+      download("supports-manifest.json", JSON.stringify(buildManifest(rawParts), null, 2), "application/json");
+      return;
+    }
     if (!lastSheets.length) return;
     if (btn.dataset.fmt === "svg") download("nesting-all.svg", allToSVGFile(lastSheets), "image/svg+xml");
     else if (btn.dataset.fmt === "dxf") download("nesting-all.dxf", allToDXF(lastSheets), "application/dxf");
@@ -330,7 +525,8 @@ export function createNestingView(): NestingView {
   return {
     el,
     setParts(p) {
-      parts = p;
+      rawParts = p;
+      computeParts();
       render();
     },
     setVisible(v) {
