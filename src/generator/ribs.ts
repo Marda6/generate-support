@@ -266,22 +266,48 @@ function addRib(
   return true;
 }
 
+/**
+ * Раскладка хребтов вдоль across-оси с шагом spacing, центрированная,
+ * с отступом от краёв детали. Число хребтов задаётся параметром Distance Y.
+ */
+function spineLayout(min: number, max: number, spacing: number): number[] {
+  const span = max - min;
+  if (span < 1 || spacing <= 0) return [];
+  const inset = span * 0.12;
+  const lo = min + inset;
+  const hi = max - inset;
+  const usable = hi - lo;
+  const center = (min + max) / 2;
+  if (usable <= 0) return [center];
+  let n = Math.floor(usable / spacing) + 1; // число хребтов
+  n = Math.max(1, Math.min(n, 8));
+  if (n === 1) return [center];
+  const start = center - (spacing * (n - 1)) / 2;
+  const offs: number[] = [];
+  for (let i = 0; i < n; i++) {
+    offs.push(Math.max(lo, Math.min(hi, start + i * spacing)));
+  }
+  return offs;
+}
+
 export function buildSupports(model: THREE.Mesh, params: SupportParams): BuildResult {
   const group = new THREE.Group();
   group.name = "supports";
 
-  // Авто-режим: ориентируем сетку строго по главной оси детали (PCA),
-  // чтобы рёбра шли вдоль/поперёк оси. Rotate Z в авто-режиме не применяется.
-  const frameAngle = principalAngleDeg(model);
+  // Тип детали определяем на чистой оси PCA (без ручного доворота).
+  const pcaAngle = principalAngleDeg(model);
+  const detSamples = prepareMesh(model, pcaAngle);
+  const detB = detSamples.bounds;
+  // В PCA-кадре длинная ось детали всегда вдоль xp → alongAxis = "X".
+  const alongAxis: RibAxis = detB.maxXp - detB.minXp >= detB.maxYp - detB.minYp ? "X" : "Y";
+  const curvature = detectCurvature(detSamples, alongAxis);
 
+  // Строим в кадре PCA + ручной Rotate Z (поле реально доворачивает сетку).
+  const frameAngle = pcaAngle + params.rotateZ;
   const samples: MeshSamples = prepareMesh(model, frameAngle);
   const b = samples.bounds;
   const xpSpan = b.maxXp - b.minXp;
   const ypSpan = b.maxYp - b.minYp;
-
-  // Главная (длинная) ось — вдоль большего размаха.
-  const alongAxis: RibAxis = xpSpan >= ypSpan ? "X" : "Y";
-  const curvature = detectCurvature(samples, alongAxis);
 
   if (curvature === "double") {
     // Двоякоизогнутая деталь → полная решётка egg-crate.
@@ -304,20 +330,12 @@ export function buildSupports(model: THREE.Mesh, params: SupportParams): BuildRe
   const acrossMax = acrossAxis === "X" ? b.maxXp : b.maxYp;
   const alongSpan = alongMax - alongMin;
   const acrossSpan = acrossMax - acrossMin;
-  const alongDist = alongAxis === "X" ? params.distanceX : params.distanceY;
-  const acrossDist = acrossAxis === "X" ? params.distanceX : params.distanceY;
+  // Distance X → шаг сёдел (вдоль оси), Distance Y → шаг хребтов (поперёк оси).
+  const saddleDist = alongAxis === "X" ? params.distanceX : params.distanceY;
+  const spineDist = acrossAxis === "X" ? params.distanceX : params.distanceY;
 
-  // Сёдла — поперёк оси (плоскость постоянной along-координаты), режутся сверху.
-  const saddleOffsets = gridOffsets(alongMin, alongMax, alongDist);
-  // Хребты — вдоль оси: 1–2 штуки для связки сёдел и устойчивости от опрокидывания.
-  // (полная решётка вдоль оси для призмы избыточна)
-  const spineOffsets =
-    acrossSpan < 1
-      ? []
-      : acrossSpan < 80
-        ? [acrossMin + acrossSpan * 0.5]
-        : [acrossMin + acrossSpan * 0.28, acrossMin + acrossSpan * 0.72];
-  void acrossDist;
+  const saddleOffsets = gridOffsets(alongMin, alongMax, saddleDist);
+  const spineOffsets = spineLayout(acrossMin, acrossMax, spineDist);
 
   let saddleCount = 0;
   saddleOffsets.forEach((off, i) => {

@@ -41,9 +41,9 @@ export interface SupportParams {
 }
 
 export const DEFAULT_PARAMS: SupportParams = {
-  rotateZ: 10,
-  distanceX: 107.881,
-  distanceY: 216.348,
+  rotateZ: 0,
+  distanceX: 50,
+  distanceY: 50,
   thickness: 1,
   notchHeadHeight: 3,
   notchHeadWidth: 5,
@@ -93,6 +93,6 @@ export const FIELDS: Field[] = [
   { kind: "number", key: "slotWidth", label: "Slot Width", step: 0.5, min: 0, group: "slot" },
   { kind: "number", key: "slotR1", label: "Slot R1", step: 0.05, min: 0, group: "slot" },
   { kind: "number", key: "slotR2", label: "Slot R2", step: 0.05, min: 0, group: "slot" },
-  { kind: "number", key: "windowsOffset", label: "Windows Offset", step: 0.5, min: 0, group: "windows" },
   { kind: "toggle", key: "generateWindows", label: "Generate Windows", group: "windows" },
+  { kind: "number", key: "windowsOffset", label: "Windows Offset", step: 0.5, min: 0, group: "windows" },
 ];

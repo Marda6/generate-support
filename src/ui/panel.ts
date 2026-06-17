@@ -29,6 +29,17 @@ export function buildPanel(
     timer = window.setTimeout(() => cb.onChange({ ...params }), 120);
   };
 
+  // Зависимые поля: Windows Offset активен только при включённой генерации окон.
+  const numberInputs: Partial<Record<string, HTMLInputElement>> = {};
+  const refreshDeps = () => {
+    const off = numberInputs["windowsOffset"];
+    if (!off) return;
+    const disabled = !params.generateWindows;
+    off.disabled = disabled;
+    const lbl = off.previousElementSibling as HTMLElement | null;
+    lbl?.classList.toggle("dim", disabled);
+  };
+
   let prevGroup: string | null = null;
   for (const f of FIELDS) {
     // Тонкий разделитель + воздух между смысловыми группами.
@@ -71,6 +82,7 @@ export function buildPanel(
           emit();
         }
       });
+      numberInputs[f.key] = input;
       row.appendChild(input);
     } else {
       const toggle = document.createElement("button");
@@ -81,12 +93,14 @@ export function buildPanel(
       toggle.addEventListener("click", () => {
         (params[f.key] as boolean) = !(params[f.key] as boolean);
         sync();
+        refreshDeps();
         emit();
       });
       row.appendChild(toggle);
     }
     list.appendChild(row);
   }
+  refreshDeps();
 
   const status = document.createElement("div");
   status.className = "panel-status";

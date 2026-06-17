@@ -152,6 +152,13 @@ button:active {
   line-height: 16px;
   white-space: nowrap;
 }
+.param-label.dim {
+  opacity: 0.4;
+}
+.param-input:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 
 .param-input {
   background: var(--sec2);
@@ -247,13 +254,15 @@ button:active {
   transition: background 0.15s, filter 0.15s;
 }
 
-/* OK — 16% белого */
+/* OK — белый 8%; на ховере фон 12% + рамка белый 8% */
 .btn-ok {
-  background: rgba(250, 250, 250, 0.16);
+  background: rgba(250, 250, 250, 0.08);
   color: var(--t100);
+  border: 1px solid transparent; /* резерв под рамку, чтобы не было сдвига */
 }
 .btn-ok:hover {
-  background: rgba(250, 250, 250, 0.22);
+  background: rgba(250, 250, 250, 0.12);
+  border-color: rgba(250, 250, 250, 0.08);
 }
 
 /* Cancel — ссылка-кнопка */
