@@ -1,4 +1,5 @@
 import { FIELDS, type SupportParams } from "../params";
+import { SUPPORT_TYPES, type SupportKind } from "../generator/ribs";
 
 /** Формат числа: до 3 знаков после запятой, без хвостовых нулей. */
 function fmt(v: number): string {
@@ -10,13 +11,10 @@ export interface PanelCallbacks {
   onOk: () => void;
   onCancel: () => void;
   onExport: () => void;
+  onToggleType: (kind: SupportKind, visible: boolean) => void;
 }
 
-export function buildPanel(
-  host: HTMLElement,
-  params: SupportParams,
-  cb: PanelCallbacks
-): { setStatus: (s: string) => void } {
+export function buildPanel(host: HTMLElement, params: SupportParams, cb: PanelCallbacks): void {
   host.innerHTML = "";
 
   const list = document.createElement("div");
@@ -102,9 +100,33 @@ export function buildPanel(
   }
   refreshDeps();
 
-  const status = document.createElement("div");
-  status.className = "panel-status";
-  host.appendChild(status);
+  // Легенда типов поддержек: цветной кружок, название и чекбокс видимости.
+  const legend = document.createElement("div");
+  legend.className = "legend";
+  for (const tdef of SUPPORT_TYPES) {
+    const row = document.createElement("label");
+    row.className = "legend-row";
+
+    const dot = document.createElement("span");
+    dot.className = "legend-dot";
+    dot.style.background = "#" + tdef.color.toString(16).padStart(6, "0");
+
+    const nm = document.createElement("span");
+    nm.className = "legend-name";
+    nm.textContent = tdef.label;
+
+    const chk = document.createElement("input");
+    chk.type = "checkbox";
+    chk.className = "legend-check";
+    chk.checked = true;
+    chk.addEventListener("change", () => cb.onToggleType(tdef.kind, chk.checked));
+
+    row.appendChild(dot);
+    row.appendChild(nm);
+    row.appendChild(chk);
+    legend.appendChild(row);
+  }
+  host.appendChild(legend);
 
   const actions = document.createElement("div");
   actions.className = "panel-actions";
@@ -122,6 +144,4 @@ export function buildPanel(
   actions.appendChild(cancel);
   actions.appendChild(ok);
   host.appendChild(actions);
-
-  return { setStatus: (s: string) => (status.textContent = s) };
 }

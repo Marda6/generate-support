@@ -35,9 +35,19 @@ const params: SupportParams = { ...DEFAULT_PARAMS };
 let supports: THREE.Group | null = null;
 const selection = new SelectionManager(viewer, viewport);
 
-const panel = buildPanel(panelHost, params, {
+// Видимость типов поддержек (легенда с чекбоксами).
+const typeVisible: Record<string, boolean> = { x: true, y: true, base: true };
+function applyVisibility() {
+  if (!supports) return;
+  supports.children.forEach((o) => {
+    const kind = o.userData?.kind as string | undefined;
+    if (kind) o.visible = typeVisible[kind] !== false;
+  });
+}
+
+buildPanel(panelHost, params, {
   onChange: (p) => regenerate(p),
-  onOk: () => panel.setStatus("Done. Supports generated."),
+  onOk: () => {},
   onCancel: () => {
     selection.deselect();
     if (supports) {
@@ -45,16 +55,15 @@ const panel = buildPanel(panelHost, params, {
       disposeGroup(supports);
       supports = null;
     }
-    panel.setStatus("Cancelled.");
   },
   onExport: () => {
-    if (!supports) {
-      panel.setStatus("Generate supports first.");
-      return;
-    }
+    if (!supports) return;
     const blob = exportSTL(supports);
     downloadBlob(blob, "supports.stl");
-    panel.setStatus("STL exported.");
+  },
+  onToggleType: (kind, visible) => {
+    typeVisible[kind] = visible;
+    applyVisibility();
   },
 });
 
@@ -66,7 +75,6 @@ function disposeGroup(g: THREE.Group) {
 }
 
 function regenerate(p: SupportParams) {
-  const t0 = performance.now();
   if (supports) {
     viewer.scene.remove(supports);
     disposeGroup(supports);
@@ -76,15 +84,9 @@ function regenerate(p: SupportParams) {
     supports = res.group;
     viewer.scene.add(supports);
     selection.setSupports(supports);
-    const ms = Math.round(performance.now() - t0);
-    if (res.strategy === "saddle") {
-      panel.setStatus(`Auto: cylinder/prism → saddles=${res.ribCountX}, spines=${res.ribCountY} · ${ms} ms`);
-    } else {
-      panel.setStatus(`Auto: egg-crate → X=${res.ribCountX}, Y=${res.ribCountY} · ${ms} ms`);
-    }
+    applyVisibility();
   } catch (e) {
     console.error(e);
-    panel.setStatus("Generation error: " + (e as Error).message);
   }
 }
 
@@ -102,6 +104,3 @@ requestAnimationFrame(() => {
 (window as unknown as { __sel: SelectionManager }).__sel = selection;
 (window as unknown as { __THREE: typeof THREE }).__THREE = THREE;
 
-(document.getElementById("closeBtn") as HTMLElement).addEventListener("click", () => {
-  panel.setStatus("Window closed (demo).");
-});
