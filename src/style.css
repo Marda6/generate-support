@@ -1,0 +1,365 @@
+/* Дизайн-токены общие с macro-prototype.html — окна консистентны. */
+:root {
+  --panel: #2e3038;
+  --sec: rgba(250, 250, 250, 0.06);
+  --sec2: rgba(250, 250, 250, 0.04);
+  --bd: rgba(250, 250, 250, 0.06);
+  --t100: #fafafa;
+  --t64: rgba(250, 250, 250, 0.64);
+  --t32: rgba(250, 250, 250, 0.32);
+  --red: #f34257;
+  --green: #4caf78;
+  --hover: rgba(255, 255, 255, 0.08);
+  --ease: cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  font-family: "Roboto", -apple-system, system-ui, sans-serif;
+  background: #202228;
+  color: var(--t100);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+#app {
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+button {
+  font-family: inherit;
+}
+button:active {
+  transform: scale(0.98);
+}
+
+/* ---------- dialog ---------- */
+.dialog {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 1180px;
+  height: 100%;
+  max-height: 760px;
+  background: var(--panel);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+  user-select: none;
+}
+
+.dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px 8px 14px;
+  font-size: 13px;
+  line-height: 16px;
+}
+
+.dialog-header .ttl {
+  font-weight: 500;
+}
+
+.x {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--t100);
+  opacity: 0.9;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  transition: background 0.12s;
+}
+.x:hover {
+  opacity: 1;
+  background: var(--hover);
+}
+
+.dialog-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  padding: 0 10px 10px;
+  gap: 10px;
+}
+
+/* ---------- panel ---------- */
+.panel {
+  /* min-content → ширина по параметрам (метки nowrap), строка статуса не раздувает */
+  width: min-content;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(250, 250, 250, 0.15) transparent;
+  padding-right: 2px;
+}
+
+.panel-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--t100);
+  padding: 2px 2px 0;
+}
+
+.param-list {
+  background: var(--sec);
+  border-radius: 8px;
+  padding: 8px;
+  display: grid;
+  grid-template-columns: max-content 70px;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+/* строка-обёртка раскрывается в ячейки общей сетки → колонки выровнены */
+.param-row {
+  display: contents;
+}
+
+/* разделитель между смысловыми группами параметров */
+.param-divider {
+  grid-column: 1 / -1;
+  height: 1px;
+  background: var(--bd);
+  margin: 4px 0;
+}
+
+.param-label {
+  color: var(--t64);
+  font-size: 12px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.param-input {
+  background: var(--sec2);
+  border: 1px solid var(--bd);
+  border-radius: 4px;
+  color: var(--t100);
+  padding: 4px 8px;
+  font-size: 12px;
+  line-height: 16px;
+  width: 100%;
+  outline: none;
+  font-family: inherit;
+  transition: border-color 0.15s, background 0.15s;
+}
+.param-input:hover {
+  background: rgba(250, 250, 250, 0.07);
+}
+.param-input:focus {
+  border-color: rgba(250, 250, 250, 0.28);
+  background: rgba(250, 250, 250, 0.07);
+}
+/* убираем стрелки number-инпута, чтобы значение помещалось */
+.param-input::-webkit-outer-spin-button,
+.param-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.param-input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+/* toggle — выкл. нейтральный, вкл. зелёный акцент */
+.param-toggle {
+  position: relative;
+  width: 40px;
+  height: 22px;
+  border-radius: 11px;
+  background: rgba(250, 250, 250, 0.12);
+  border: none;
+  cursor: pointer;
+  justify-self: start;
+  transition: background 0.15s var(--ease);
+}
+.param-toggle::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--t64);
+  transition: transform 0.15s var(--ease), background 0.15s;
+}
+.param-toggle.on {
+  background: var(--green);
+}
+.param-toggle.on::after {
+  transform: translateX(18px);
+  background: #fff;
+}
+
+.panel-status {
+  /* процентная ширина не участвует в расчёте fit-content панели —
+     длинная строка статуса не раздувает ширину, а переносится */
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--t32);
+  min-height: 15px;
+  padding: 0 4px;
+  white-space: normal;
+}
+
+.panel-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: auto;
+  width: 100%;
+}
+
+.btn {
+  flex: 1;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 16px;
+  cursor: pointer;
+  padding: 9px 16px;
+  transition: background 0.15s, filter 0.15s;
+}
+
+/* OK — 16% белого */
+.btn-ok {
+  background: rgba(250, 250, 250, 0.16);
+  color: var(--t100);
+}
+.btn-ok:hover {
+  background: rgba(250, 250, 250, 0.22);
+}
+
+/* Cancel — ссылка-кнопка */
+.btn-cancel {
+  background: transparent;
+  color: var(--t100);
+}
+.btn-cancel:hover {
+  color: var(--t64);
+}
+
+/* ---------- viewport ---------- */
+.viewport {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #14181d;
+}
+
+.viewport canvas {
+  display: block;
+}
+
+/* ---------- gizmo control bar ---------- */
+.gizmo-bar {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  background: rgba(46, 48, 56, 0.92);
+  border: 1px solid var(--bd);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(8px);
+  z-index: 5;
+}
+.gizmo-bar.hidden {
+  display: none;
+}
+
+.gz-btn {
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--t64);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.gz-btn:hover {
+  background: var(--hover);
+  color: var(--t100);
+}
+/* активный режим — оранжевый акцент поддержек */
+.gz-btn.active {
+  background: rgba(255, 138, 60, 0.22);
+  color: #ff8a3c;
+}
+
+.gz-sep {
+  width: 1px;
+  height: 18px;
+  background: rgba(250, 250, 250, 0.12);
+}
+
+.gz-label {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--t100);
+  padding: 0 4px;
+  white-space: nowrap;
+}
+
+.gz-close {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--t32);
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.12s, color 0.12s;
+}
+.gz-close:hover {
+  background: var(--hover);
+  color: var(--t100);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
