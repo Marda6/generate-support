@@ -7,6 +7,8 @@ import { buildSupports } from "./generator/ribs";
 import { buildPanel } from "./ui/panel";
 import { exportSTL, downloadBlob } from "./export/stl";
 import { SelectionManager } from "./viewer/selection";
+import { createNestingView } from "./ui/nestingView";
+import type { Part } from "./export/nesting";
 
 const app = document.getElementById("app")!;
 app.innerHTML = `
@@ -45,6 +47,36 @@ function applyVisibility() {
   });
 }
 
+// Вкладка раскроя + переключатель 3D / Nesting.
+const nesting = createNestingView();
+viewport.appendChild(nesting.el);
+
+let lastParts: Part[] = [];
+const visibleParts = (): Part[] => lastParts.filter((p) => typeVisible[p.kind] !== false);
+
+const tabs = document.createElement("div");
+tabs.className = "view-tabs";
+tabs.innerHTML = `
+  <button class="view-tab active" data-tab="3d">3D</button>
+  <button class="view-tab" data-tab="nesting">Nesting</button>
+`;
+viewport.appendChild(tabs);
+
+function setTab(tab: string) {
+  tabs.querySelectorAll(".view-tab").forEach((b) => {
+    b.classList.toggle("active", (b as HTMLElement).dataset.tab === tab);
+  });
+  const showNest = tab === "nesting";
+  if (showNest) {
+    selection.deselect();
+    nesting.setParts(visibleParts());
+  }
+  nesting.setVisible(showNest);
+}
+tabs.querySelectorAll(".view-tab").forEach((b) => {
+  b.addEventListener("click", () => setTab((b as HTMLElement).dataset.tab!));
+});
+
 buildPanel(panelHost, params, {
   onChange: (p) => regenerate(p),
   onOk: () => {},
@@ -64,6 +96,7 @@ buildPanel(panelHost, params, {
   onToggleType: (kind, visible) => {
     typeVisible[kind] = visible;
     applyVisibility();
+    nesting.setParts(visibleParts());
   },
 });
 
@@ -85,6 +118,8 @@ function regenerate(p: SupportParams) {
     viewer.scene.add(supports);
     selection.setSupports(supports);
     applyVisibility();
+    lastParts = res.parts;
+    nesting.setParts(visibleParts());
   } catch (e) {
     console.error(e);
   }

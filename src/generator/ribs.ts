@@ -9,6 +9,7 @@ import {
   type RibAxis,
 } from "./section";
 import { principalAngleDeg, detectCurvature } from "./strategy";
+import type { Part } from "../export/nesting";
 
 const MIN_HEIGHT = 0.5; // минимальная высота ребра, чтобы полигон оставался корректным
 
@@ -222,6 +223,8 @@ export interface BuildResult {
   strategy: "egg-crate" | "saddle";
   /** Высота опорной плиты на полу (0 — деталь слишком близко к полу). */
   baseHeight: number;
+  /** Плоские контуры всех деталей для раскроя (nesting / SVG). */
+  parts: Part[];
 }
 
 const COLOR_ORANGE = 0xff8a3c;
@@ -229,6 +232,13 @@ const COLOR_BLUE = 0x3b7bff;
 const COLOR_VIOLET = 0x9d6bff; // опорная плита на полу
 
 export type SupportKind = "x" | "y" | "base";
+
+/** Плоский контур фигуры (внешний путь + отверстия) для раскроя. */
+function shapeToPart(shape: THREE.Shape, kind: SupportKind, label: string): Part {
+  const ep = shape.extractPoints(12);
+  const map = (v: THREE.Vector2) => ({ x: v.x, y: v.y });
+  return { kind, label, contour: ep.shape.map(map), holes: ep.holes.map((h) => h.map(map)) };
+}
 
 /** Типы поддержек для легенды/управления видимостью. */
 export const SUPPORT_TYPES: { kind: SupportKind; label: string; color: number }[] = [
@@ -282,15 +292,18 @@ function addRib(
   acrossSpan: number,
   bottomZ: number,
   tabSink: Rect[],
+  parts: Part[],
   name: string
 ): boolean {
   const profile = lowerEnvelope(sectionMesh(samples, axis, offset), Math.max(1, acrossSpan / 200));
   if (!profile) return false;
   const { shape, tabU } = buildRibShape(profile, params, crossings, topSlotted, bottomZ);
+  const kind: SupportKind = color === COLOR_ORANGE ? "x" : "y";
   const mesh = placeRib(shape, axis, offset, params.thickness, frameAngle, makeMat(color), color);
   mesh.name = name;
-  mesh.userData.kind = color === COLOR_ORANGE ? "x" : "y";
+  mesh.userData.kind = kind;
   group.add(mesh);
+  parts.push(shapeToPart(shape, kind, name));
 
   // Пазы под язычки в плите: ширина паза = ширина язычка по u, глубина = толщина ребра поперёк.
   const half = params.thickness / 2;
@@ -396,7 +409,8 @@ function buildBasePlate(
   params: SupportParams,
   tabHoles: Rect[],
   xpLines: number[],
-  ypLines: number[]
+  ypLines: number[],
+  parts: Part[]
 ): THREE.Mesh {
   const margin = Math.max(5, (fp.maxXp - fp.minXp) * 0.03);
   const x0 = fp.minXp - margin;
@@ -450,6 +464,7 @@ function buildBasePlate(
   mesh.applyMatrix4(m);
   mesh.name = "Base";
   mesh.userData.kind = "base";
+  parts.push(shapeToPart(shape, "base", "Base"));
   return mesh;
 }
 
@@ -479,19 +494,20 @@ export function buildSupports(model: THREE.Mesh, params: SupportParams): BuildRe
   const baseHeight = clearance > params.thickness + 1 ? params.thickness : 0;
   const footprint: Footprint = { minXp: b.minXp, maxXp: b.maxXp, minYp: b.minYp, maxYp: b.maxYp };
   const tabHoles: Rect[] = []; // пазы под язычки рёбер, прорезаемые в плите
+  const parts: Part[] = []; // плоские контуры деталей для раскроя
 
   if (curvature === "double") {
     // Двоякоизогнутая деталь → полная решётка egg-crate.
     const xOffsets = gridOffsets(b.minXp, b.maxXp, params.distanceX);
     const yOffsets = gridOffsets(b.minYp, b.maxYp, params.distanceY);
     xOffsets.forEach((off, i) => {
-      addRib(group, samples, "X", off, yOffsets, true, frameAngle, COLOR_ORANGE, params, ypSpan, baseHeight, tabHoles, `Rib X${i + 1}`);
+      addRib(group, samples, "X", off, yOffsets, true, frameAngle, COLOR_ORANGE, params, ypSpan, baseHeight, tabHoles, parts, `Rib X${i + 1}`);
     });
     yOffsets.forEach((off, i) => {
-      addRib(group, samples, "Y", off, xOffsets, false, frameAngle, COLOR_BLUE, params, xpSpan, baseHeight, tabHoles, `Rib Y${i + 1}`);
+      addRib(group, samples, "Y", off, xOffsets, false, frameAngle, COLOR_BLUE, params, xpSpan, baseHeight, tabHoles, parts, `Rib Y${i + 1}`);
     });
-    if (baseHeight > 0) group.add(buildBasePlate(footprint, params.thickness, frameAngle, COLOR_VIOLET, params, tabHoles, xOffsets, yOffsets));
-    return { group, ribCountX: xOffsets.length, ribCountY: yOffsets.length, strategy: "egg-crate", baseHeight };
+    if (baseHeight > 0) group.add(buildBasePlate(footprint, params.thickness, frameAngle, COLOR_VIOLET, params, tabHoles, xOffsets, yOffsets, parts));
+    return { group, ribCountX: xOffsets.length, ribCountY: yOffsets.length, strategy: "egg-crate", baseHeight, parts };
   }
 
   // Одинарная кривизна (цилиндр/призма) → поперечные сёдла + продольные хребты.
@@ -511,12 +527,12 @@ export function buildSupports(model: THREE.Mesh, params: SupportParams): BuildRe
 
   let saddleCount = 0;
   saddleOffsets.forEach((off, i) => {
-    if (addRib(group, samples, alongAxis, off, spineOffsets, true, frameAngle, COLOR_ORANGE, params, acrossSpan, baseHeight, tabHoles, `Saddle ${i + 1}`))
+    if (addRib(group, samples, alongAxis, off, spineOffsets, true, frameAngle, COLOR_ORANGE, params, acrossSpan, baseHeight, tabHoles, parts, `Saddle ${i + 1}`))
       saddleCount++;
   });
   let spineCount = 0;
   spineOffsets.forEach((off, i) => {
-    if (addRib(group, samples, acrossAxis, off, saddleOffsets, false, frameAngle, COLOR_BLUE, params, alongSpan, baseHeight, tabHoles, `Spine ${i + 1}`))
+    if (addRib(group, samples, acrossAxis, off, saddleOffsets, false, frameAngle, COLOR_BLUE, params, alongSpan, baseHeight, tabHoles, parts, `Spine ${i + 1}`))
       spineCount++;
   });
 
@@ -524,7 +540,7 @@ export function buildSupports(model: THREE.Mesh, params: SupportParams): BuildRe
     // Линии рёбер по осям: сёдла идут по alongAxis, хребты — по acrossAxis.
     const xpLines = alongAxis === "X" ? saddleOffsets : spineOffsets;
     const ypLines = alongAxis === "X" ? spineOffsets : saddleOffsets;
-    group.add(buildBasePlate(footprint, params.thickness, frameAngle, COLOR_VIOLET, params, tabHoles, xpLines, ypLines));
+    group.add(buildBasePlate(footprint, params.thickness, frameAngle, COLOR_VIOLET, params, tabHoles, xpLines, ypLines, parts));
   }
-  return { group, ribCountX: saddleCount, ribCountY: spineCount, strategy: "saddle", baseHeight };
+  return { group, ribCountX: saddleCount, ribCountY: spineCount, strategy: "saddle", baseHeight, parts };
 }
